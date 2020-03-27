@@ -1,5 +1,6 @@
 // Creëer Express applicatie
 var express = require("express");
+var cors = require("cors");
 var app = express();
 const path = require("path");
 
@@ -25,10 +26,16 @@ db.serialize(() => {
 });
 
 // Sta externe communicatie toe
-app.use((req, res, next) => {
-  res.header("Access-Control-Allow-Origin", "*");
-  next();
-});
+// app.use((req, res, next) => {
+//   res.header("Access-Control-Allow-Origin", "*");
+//   res.header("Access-Control-Allow-Headers", "*");
+//   next();
+// });
+app.use(cors());
+
+// Tell Express to use the body-parser middleware and to not parse extended bodies
+app.use(express.urlencoded({extended: true}));
+app.use(express.json());
 
 // Voorbeeld van een html response met Express (ter illustratie)
 app.get("/", function(req, res) {
@@ -46,10 +53,29 @@ app.get("/users", (req, res) => {
   });
 });
 
+//Antwoord met 1 gebruiker
+app.get("/users/:userId", (req, res) => {
+  let userId = req.params.userId;
+
+  if (!userId) {
+    res.send({ error: "No userId argument found" });
+    return;
+  }
+
+  db.all("SELECT * from Users WHERE id = (?)", userId, (err, rows) => {
+    if (err) {
+      res.send({ error: err });
+      return;
+    }
+    res.send(JSON.stringify(rows));
+  });
+});
+
 // Voeg een gebruiker toe aan de database
-app.get("/add", (req, res) => {
+app.post("/users", (req, res) => {
   // controleer of de name parameter is meegegeven
-  let name = req.query.name;
+  let name = req.body.name;
+
   if (!name) {
     res.send({ error: "No name argument found" });
     return;
@@ -77,114 +103,72 @@ app.get("/add", (req, res) => {
 });
 
 // Voeg een notitie toe
-app.get("/addnote", (req, res) => {
+app.post("/users/:userId/notes", (req, res) => {
   // controleer of de parameters meegegeven zijn
-  let name = req.query.name;
-  let content = req.query.content;
-  if (!name || !content) {
-    res.send({ error: "Parameters name and content are required" });
+  let userId = req.params.userId;
+  let content = req.body.content;
+
+  if (!content) {
+    res.send({ error: "Parameters content is required" });
     return;
   }
 
-  // haal de gebruiker op uit de database
-  db.get(`SELECT id FROM Users WHERE name LIKE ?`, [name], (err, row) => {
-    // return een eventuele error
-    if (err) {
-      res.send({ error: err });
-      return;
-    }
-    if (!row) {
-      res.send({ error: `No user named ${name}` });
-      return;
-    }
-
-    // haal alle notities van de gebruiker op
-    let userId = row.id;
-    db.run(
-      `INSERT INTO Notes(content, userId) VALUES(?, ?)`,
-      [content, userId],
-      err => {
-        if (err) {
-          res.send({ error: err });
-          return;
-        }
-        res.send({ success: "Inserted note" });
-      }
-    );
-  });
-});
-
-// Antwoord met een lijst van alle notities van een gebruiker
-app.get("/notes", (req, res) => {
-  // controleer of de naam parameter is meegegeven
-  let name = req.query.name;
-  if (!name) {
-    res.send({ error: "No name argument found" });
-    return;
-  }
-
-  // haal de userId van de gebruiker op
-  db.get(`SELECT id from Users WHERE name LIKE (?)`, name, (err, row) => {
-    // return bij eventuele error
-    if (err) {
-      res.send({ error: err });
-      return;
-    }
-    // controleer of een gebruiker met de naam bestaat
-    if (!row) {
-      res.send({ error: `No user named ${name}` });
-      return;
-    }
-
-    // haal alle notities van de gebruiker op
-    let userId = row.id;
-    db.all("SELECT * from Notes WHERE userId = ?", userId, (err, rows) => {
+  db.run(
+    `INSERT INTO Notes(content, userId) VALUES(?, ?)`,
+    [content, userId],
+    err => {
       if (err) {
         res.send({ error: err });
         return;
       }
-      res.send(JSON.stringify(rows));
-    });
+      res.send({ success: "Inserted note" });
+    }
+  );
+});
+
+// Antwoord met een lijst van alle notities van een gebruiker
+app.get("/users/:userId/notes", (req, res) => {
+  // controleer of de naam parameter is meegegeven
+  let userId = req.params.userId;
+
+  if (!userId) {
+    res.send({ error: "No userId argument found" });
+    return;
+  }
+
+  db.all("SELECT * from Notes WHERE userId = ?", userId, (err, rows) => {
+    if (err) {
+      res.send({ error: err });
+      return;
+    }
+    res.send(JSON.stringify(rows));
   });
 });
 
 // Verwijdert gebruiker met diens notities
-app.get("/remove", (req, res) => {
+app.delete("/users/:userId", (req, res) => {
   // controleer of de naam parameter is meegegeven
-  let name = req.query.name;
-  if (!name) {
-    res.send({ error: "No name argument found" });
+  let userId = req.params.userId;
+
+  if (!userId) {
+    res.send({ error: "No userId argument found" });
     return;
   }
 
-  db.get(`SELECT id FROM Users WHERE name LIKE ?`, [name], (err, row) => {
-    // return bij eventuele error
+  
+  db.run(`DELETE FROM Notes WHERE userId = (?)`, [userId], err => {
     if (err) {
       res.send({ error: err });
       return;
     }
-    // controleer of een gebruiker met de naam bestaat
-    if (!row) {
-      res.send({ error: `No user named ${name}` });
+  });
+  // verwijder de gebruiker
+  db.run(`DELETE FROM Users WHERE id = (?)`, [userId], err => {
+    if (err) {
+      res.send({ error: err });
       return;
     }
-
-    // verwijder notities van de gebruiker
-    let userId = row.id;
-    db.run(`DELETE FROM Notes WHERE userId = (?)`, [userId], err => {
-      if (err) {
-        res.send({ error: err });
-        return;
-      }
-    });
-    // verwijder de gebruiker
-    db.run(`DELETE FROM Users WHERE id = (?)`, [userId], err => {
-      if (err) {
-        res.send({ error: err });
-        return;
-      }
-      res.send({ success: "Deleted successfully" });
-    });
+    res.send({ success: "Deleted successfully" });
   });
 });
 
